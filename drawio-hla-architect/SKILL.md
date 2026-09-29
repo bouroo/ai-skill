@@ -24,9 +24,9 @@ This skill provides comprehensive standards, XML templates, and visual conventio
 
 1. **Mandatory 2-Page Draw.io Structure:**
    Every generated Draw.io XML HLA diagram **MUST include at least two pages/tabs**:
-   * **Page 1 (`HLA Overview`):** The end-to-end multi-swimlane architecture diagram.
-   * **Page 2 (`Standard Colors and Icons` / `id="ao9VHCrxs2CTfegMv53f"`):** The complete enterprise standard palette tab, containing the Component Lifecycle Matrix (New, Enhanced, Existing, External), Connection Types (Sync, Async, Kafka, Token), Kubernetes Pod shapes, color-coded Database Cylinders, and official Technology & Infrastructure Icons.
-   * *Template Resource:* The standard Page 2 XML is located in `resources/standard_icons_tab.xml`, beside this skill (the layout engine resolves it relative to its own file — never hard-code absolute paths).
+   * **Palette tab (`Standard Colors and Icons` / `id="ao9VHCrxs2CTfegMv53f"`):** the complete enterprise standard palette, containing the Component Lifecycle Matrix (New, Enhanced, Existing, External), Connection Types (Sync, Async, Kafka, Token), Kubernetes Pod shapes, color-coded Database Cylinders, and official Technology & Infrastructure Icons. It is the **first tab** — the colour key before the colours (§4).
+   * **Architecture tab (`HLA Overview`):** the end-to-end multi-swimlane architecture diagram.
+   * *Template Resource:* the standard palette XML is located in `resources/standard_icons_tab.xml`, beside this skill (the layout engine resolves it relative to its own file — never hard-code absolute paths).
 
 2. **Dedicated Swimlane for Every Tier (No Merged Layers):**
    Architectural tiers must **NEVER be combined into a single column**. Each layer must reside in its own dedicated vertical swimlane:
@@ -54,6 +54,20 @@ This skill provides comprehensive standards, XML templates, and visual conventio
    * **Bounded Corridors:** forward multi-lane spans dip through the gap band **between slot rows** (offsets measured from the row's top, so `SLOT_H + n` lands in the gap); right-to-left returns take the band **above** the lanes, falling back to the bus below when the top band is full. A wire must never leave the page.
    * **Arc Jump Rendering:** Every edge MUST include `jumpStyle=arc;jumpSize=6;` so that whenever lines do cross, Draw.io renders a clean arc bridge.
    * **Crossing budget:** non-planarity is inherent (a Kafka hub plus a core hub forms a K₃,₃-like subgraph), so the budget is declared, not zero — the engine uses `MAX_CROSSINGS = 2` and every crossing is arc-jumped.
+
+   * **Crossing-aware declutter, and no self-crossing wire:** the router's
+     greedy column and corridor choice is only a *starting* layout. Before the
+     file is written, every wire's vertical legs and its corridor row are
+     re-chosen against the wires already placed, priced by the gate's own
+     predicate (a pair over the crossing budget costs far more than in-budget
+     crossings; sharing a line costs more still). This is what removes the
+     long-sweep crossings a row order alone cannot fix. A wire that **doubles
+     back on its own run** - leaving a node, reaching a corridor, then climbing
+     back past the row it left - is its own defect class: it is ONE edge, so the
+     per-pair crossing rule cannot see it. Both the columns and the corridor row
+     must agree about which side of the anchors the wire runs on; a same-lane
+     hop therefore takes the band *between* its two rows, never the band under
+     the lower one.
 
 5. **Standard Database Icons (PostgreSQL, MySQL, MongoDB, Redis):**
    Database components **MUST use official Standard Database Icons** (Vector SVG / Image) from the standard palette rather than plain cylinders alone. **Mandatory:** All standard image icons MUST include `html=1;` and `whiteSpace=wrap;` in their style to allow multiline `<br>` labels without raw `<br>` tags leaking onto the canvas:
@@ -203,6 +217,34 @@ style="shape=image;html=1;verticalLabelPosition=bottom;verticalAlign=top;imageAs
 > 1. Always append `html=1;whiteSpace=wrap;` to the style string of any standard image icon.
 > 2. Use `esc(val)` to safely convert Python newlines (`\n`) into `<br>` (escaped as `&lt;br&gt;` in XML attributes). Draw.io's HTML renderer will cleanly render each line break.
 
+
+---
+
+### 2.4. Component Lifecycle Colours (and the Legend That Names Them)
+
+Every component carries the lifecycle colour of the **palette tab** (§4), so the
+palette is a key the diagram actually uses rather than a reference nobody
+applies:
+
+| Lifecycle | Fill | Stroke | Means |
+|---|---|---|---|
+| New | `#dae8fc` | `#03CCFF` | built by this programme |
+| Enhanced | `#d5e8d4` | `#92D14F` | an existing component this programme extends |
+| Existing / reused | `#f5f5f5` | `#BFBFBF` | adopted unchanged |
+| 3rd-party partner | `#EF7D30` | `#EF7D30` | an external organisation's platform, not ours to change |
+
+Two rules make the colouring readable:
+
+* **A component the programme did not write is never coloured as its own.**
+  Partner platforms (AIS, Trustonic) are 3rd-party orange; an existing bank
+  system reached through an adaptor (DGL, DLP, DCB, CDE) is reused grey. The
+  adaptor in front of them is ours and is coloured as such — the adaptor is
+  where the work is, and painting it grey hides that.
+* **The architecture page carries its own legend**, beside the title, built from
+  the same fill/stroke pairs the nodes use. A reader should not have to open the
+  palette tab to decode a node they are already looking at: the palette tab is
+  the full catalogue, the legend is the key to *this* drawing.
+
 ---
 
 ## 3. Dedicated 7-Swimlane Architecture Blueprint & Minimal-Crossing Routing
@@ -246,14 +288,32 @@ The engine fixes every Y from the node's **slot** (§5) — slot assignment is t
 
 One node per `(lane, slot)` — the engine rejects duplicates. When two flows would collide on a row, give the newer one the next free slot; never share a slot to "save space" (that is what produced stacked wires and overlapping labels).
 
+**Order the tracks by measurement, not by taste.** Slot order is a layout knob
+with real cost: a wire's vertical leg spans the slots between its ends and
+crosses whatever horizontal runs sit in between, so which track sits where moves
+the total crossing count by tens. Keep the reading order a reviewer depends on -
+the entry track first, the customer journey descending, the scheduled batch last
+- and choose the position of the infrastructure tracks (databases, partner
+adaptors, the webhook rail) by generating the page and counting crossings. On a
+28-component / 32-edge lending model, reordering the tracks within that reading
+order and then running the declutter pass (§4) took the drawing from 78 crossings
+and 1 gate violation to 66 crossings and a clean gate.
+
 ---
 
 ## 4. Draw.io Multi-Page XML Requirement
 
 A Draw.io document must be wrapped in `<mxfile host="app.diagrams.net" pages="N">` and contain:
-1. `<diagram name="HLA Overview" id="...">`
-2. `<diagram name="Standard Colors and Icons" id="ao9VHCrxs2CTfegMv53f">`
-3. any further views (a step trace, a legend) after those two, never before.
+1. `<diagram name="Standard Colors and Icons" id="ao9VHCrxs2CTfegMv53f">` **first** — the
+   colour key a reader needs *before* meeting the colours on a wire. A diagram whose first
+   tab is the architecture forces them to open a second tab to decode the first.
+2. `<diagram name="HLA Overview" id="...">` — the end-to-end multi-swimlane architecture.
+3. any further views (a step trace, a detail table) after those two, never before.
+
+Tabs are addressed **by name, not by index** — the gate finds the architecture page by name
+and the palette page by name — so this order is a reading order, not a dependency. The
+palette page is still required: a document without it is missing the standard, whatever
+its tab order.
 
 **A trace page describes behaviour, not code.** When the third page enumerates
 steps, its columns are business-facing: step id, business action, actor, call,
@@ -345,7 +405,8 @@ wire can be invented as easily as the node.
 * **Dips:** a forward edge spanning 2+ lanes over an occupied row dips through the inter-row gap band (below the row's labels, above the next row's nodes), choosing the side (above/below) with fewer same-lane hop conflicts, and exits vertically (`exitX=0.75`) so it never shares a ray with a straight row wire.
 * **Event bus:** multi-lane `event` edges route through a corridor row, shared by span (interval colouring), not one row per edge.
 * **Returns:** backward (right-to-left) edges take the band above the lane band with explicit waypoints, falling back below the lanes when that band is full — never through lane headers, never off the page.
-* **Same-lane hops:** *every* same-lane hop leaves and re-enters through the lane's **node-free side channel**, never the node centre — the centre of one node lies inside every node stacked with it in that lane.
+* **Same-lane hops:** *every* same-lane hop leaves and re-enters through the lane's **node-free side channel**, never the node centre — the centre of one node lies inside every node stacked with it in that lane. Its corridor is the band **between** its two rows, never the band under the lower one: the wire leaves and re-enters the same side channel, so a corridor below the lower row makes it climb back past the row it left, crossing its own run (one edge, so no per-pair rule sees it).
+* **Declutter pass:** the greedy column/corridor choice above is a starting layout, not the answer. A crossing is a property of the *whole* drawing, so the engine re-chooses every wire's two columns and its corridor row against the wires already placed, longest wire first, priced by the gate's own predicate (over-budget pairs ≫ shared lines ≫ raw crossing count). On a 28-component / 32-edge model this removed 12 of 78 crossings and took the gate from 1 violation + 2 warnings to clean.
 * **Anchors:** each edge's exit/entry is offset along the node's edge, so wires sharing a row are parallel rather than collinear (collinear wires are what the checker calls `stacked`).
 * **Waypoint y:** a waypoint's y **MUST** equal its anchor's y. A waypoint on the bare row y with an offset anchor makes the first segment diagonal, and the checker then reports crossings that do not exist.
 * **Arc jumps:** every edge style carries `jumpStyle=arc;jumpSize=6;`.
@@ -384,7 +445,7 @@ first row looks like a rendering bug even though every element is legal.
 1. **Connectivity** — zero orphan nodes; `*callback*` receivers must have BOTH an incoming trigger and an outgoing downstream call.
 2. **Node overlap** — component boxes (including their below-icon label overflow) must not collide with each other.
 3. **Label hygiene** — every edge label obeys the label law (≤ 24 chars × 2 lines); no label may overlap a node.
-4. **Wire discipline** — no two wires stacked on the same line; no wire may pass through a node it does not source or target; crossings within the declared budget (every edge is arc-jumped, so a budgeted crossing renders as a clean bridge).
+4. **Wire discipline** — no two wires stacked on the same line; no wire may pass through a node it does not source or target; **no wire may cross itself** (a wire that doubles back is one edge, so a per-pair rule cannot see it — the corridor *and* the columns must both be chosen consistently); crossings within the declared budget (every edge is arc-jumped, so a budgeted crossing renders as a clean bridge).
 5. **Wire envelope** — no wire leaves the page, and none strays past the lane band horizontally. A bus below the lanes is legitimate (the event-bus rule), so depth is reported as a warning, while leaving the page is a hard failure. This is the "lines go to the bottom of the page" defect: it is invisible to every per-segment rule, because each segment is individually legal.
 
 `RESULT: PASS` with exit 0 is the publication gate. On `FAIL`, fix the declarative model (slot assignments, labels, edge kinds) and regenerate — never hand-nudge coordinates in the XML, because the next regeneration loses them.
@@ -404,6 +465,8 @@ Before publishing any Draw.io HLA diagram, verify the following:
 - [ ] **Engine Routing Law:** Rows straight on slot bands; multi-lane spans dip through the inter-row gap bands; returns above the lanes; same-lane hops via the lane's **node-free side channel**; every vertical allocated by interval colouring, never on a node centre (§5).
 - [ ] **Wire Envelope:** no wire runs off the page or outside the lane band horizontally — the engine's own gate rejects it, and a refusal leaves no file (§6).
 - [ ] **Reachability:** every microservice has an incoming wire; every external platform and store an outgoing one (§6).
+- [ ] **Lifecycle colours match the palette:** every component carries its lifecycle colour — new `#03CCFF` on `#dae8fc`, enhanced `#92D14F` on `#d5e8d4`, existing/reused `#BFBFBF` on `#f5f5f5`, 3rd-party partner `#EF7D30` — and the architecture page carries a legend naming them, so a reader need not open the palette tab to decode a node.
+- [ ] **Tab order:** the palette tab is first, the architecture second, detail pages after — the colour key before the colours (§4).
 - [ ] **Cell fit:** every table cell is sized for its own text at its own font size, and no cell carries a file name, function name or line number (§6).
 - [ ] **Provenance stated:** the model's `status` fields say what is built and what is only designed, and the rendered view matches the question being asked (§5).
 - [ ] **Labels carry their steps:** a wire labelled with step ids reproduces exactly the steps it carries — the engine proves it, and a range that silently drops an id is refused (§5).
@@ -412,7 +475,7 @@ Before publishing any Draw.io HLA diagram, verify the following:
 - [ ] **Arc Jumps Configured:** All crossing edges have `jumpStyle=arc;jumpSize=6;` configured.
 - [ ] **Dedicated Swimlanes:** Kong Gateway, Channel BFF, Orchestrator, Domain Core, and Adaptor each reside in their own separate swimlane. No tier merging.
 - [ ] **Standard Database Icons:** PostgreSQL, MySQL, MongoDB, and Redis use official Standard Icons from the standard palette rather than plain cylinders alone.
-- [ ] **Mandatory 2-Page Structure:** The XML has `pages="2"` and contains both `<diagram name="... HLA ...">` and `<diagram name="Standard Colors and Icons" id="ao9VHCrxs2CTfegMv53f">`.
+- [ ] **Mandatory 2-Page Structure:** the XML contains both `<diagram name="Standard Colors and Icons" id="ao9VHCrxs2CTfegMv53f">` and `<diagram name="... HLA ...">`, with the palette tab **first** (§4).
 - [ ] **Standard Technology Icons Used:** Redis, Kafka, Kong, Vault, and DBs use official Std icons (`shape=image;...`).
 - [ ] **Multiline Label HTML Formatting (`html=1;`):** All `shape=image;` icons with multiline text (`<br>`) have `html=1;whiteSpace=wrap;` in their style string so that raw `<br>` tags never appear on the canvas.
 - [ ] **BFF Layer Isolation:** All `bff-mobile-*` services reside exclusively in Swimlane 3 and route directly to Core or Orchestrator. No client connects to Cores directly.

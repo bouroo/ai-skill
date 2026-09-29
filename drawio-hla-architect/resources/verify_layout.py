@@ -426,6 +426,25 @@ def verify(xml_file, max_crossings=0, quiet=False, bus_depth=240,
             float(_style_val(_style_of(edges[eid]), "fontSize", 9) or 9)))
 
     edge_ids = sorted(polylines)
+    # A wire must not cross itself. The per-pair loop below compares different
+    # edges, so a single wire that doubles back - leaving a node, running out to
+    # a corridor, then climbing back past the row it left - was invisible: it is
+    # one edge, and every segment of it is legal on its own. It reads as a loop
+    # with no meaning, which is how a router that picks the corridor "under the
+    # lower of the two rows" for a same-lane hop draws itself into a knot.
+    for eid, pts in polylines.items():
+        segs = _segments(pts)
+        for i, s1 in enumerate(segs):
+            for s2 in segs[i + 2:]:
+                if _seg_intersect(s1[0], s1[1], s2[0], s2[1]):
+                    violations.append(
+                        f"wire {eid} crosses itself at "
+                        f"({s1[0][0]:.0f},{s1[0][1]:.0f}) - it doubles back on "
+                        f"its own run")
+                    break
+            else:
+                continue
+            break
     for i, a in enumerate(edge_ids):
         pa = polylines[a]
         for b in edge_ids[i + 1:]:

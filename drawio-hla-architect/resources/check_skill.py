@@ -49,6 +49,12 @@ out = "/tmp/_reg_shipped.drawio.xml"
 gen.generate_drawio_xml(out)
 v, w = gate.verify(out, gen.MAX_CROSSINGS, quiet=True)
 check("shipped model passes its own gate", not v, "; ".join(v[:3]))
+_shipped = open(out).read()
+_tabs = re.findall(r'<diagram[^>]*name="([^"]*)"', _shipped)
+check("palette tab comes first (the colour key before the colours)",
+      _tabs and _tabs[0] == "Standard Colors and Icons", str(_tabs))
+check("architecture page carries its own lifecycle legend",
+      all(f'id="leg_{k}"' in _shipped for k in ("new", "reuse", "partner")))
 
 # 2 -- large connected model
 lanes, nodes, edges = gen.build_model()
@@ -99,38 +105,72 @@ def write_and_gate(txt, path, budget=2):
     open(path, "w").write(txt)
     return gate.verify(path, budget, quiet=True)
 
+
+def in_hla(txt, old, new, count=1):
+    """Replace inside the ARCHITECTURE page only.
+
+    The document opens with the palette tab, and every page has its own
+    `<mxCell id="0" />`: an unanchored replace edits the legend instead of the
+    diagram, and the assertion then passes while testing nothing.
+    """
+    i = txt.index('name="HLA Overview"')
+    return txt[:i] + txt[i:].replace(old, new, count)
+
 v, _ = write_and_gate(src.replace('source="n_mobile"', 'source="n_mobile"', 1),
                       "/tmp/_reg_base.drawio.xml")
 check("clean file has no violations", not v, "; ".join(v[:2]))
 
 # text annotation must not be an orphan
-ann = src.replace('<mxCell id="0" />',
-                  '<mxCell id="0" />'
-                  '<mxCell id="title_ann" parent="1" '
-                  'style="text;html=1;strokeColor=none;fillColor=none;" '
-                  'value="Title" vertex="1">'
-                  '<mxGeometry x="10" y="10" width="200" height="20" '
-                  'as="geometry" /></mxCell>', 1)
+ann = in_hla(src, '<mxCell id="0" />',
+             '<mxCell id="0" />'
+             '<mxCell id="title_ann" parent="1" '
+             'style="text;html=1;strokeColor=none;fillColor=none;" '
+             'value="Title" vertex="1">'
+             '<mxGeometry x="10" y="10" width="200" height="20" '
+             'as="geometry" /></mxCell>')
 v, _ = write_and_gate(ann, "/tmp/_reg_ann.drawio.xml")
 check("text annotation is not an orphan",
       not any("title_ann" in x for x in v), "; ".join(v[:2]))
 
 # a real component with no wires must be an orphan
-orph = src.replace('<mxCell id="0" />',
-                   '<mxCell id="0" />'
-                   '<mxCell id="n_orphan_real" parent="1" '
-                   'style="rounded=1;html=1;whiteSpace=wrap;" value="lonely" '
-                   'vertex="1"><mxGeometry x="10" y="10" width="120" '
-                   'height="30" as="geometry" /></mxCell>', 1)
+orph = in_hla(src, '<mxCell id="0" />',
+              '<mxCell id="0" />'
+              '<mxCell id="n_orphan_real" parent="1" '
+              'style="rounded=1;html=1;whiteSpace=wrap;" value="lonely" '
+              'vertex="1"><mxGeometry x="10" y="10" width="120" '
+              'height="30" as="geometry" /></mxCell>')
 v, _ = write_and_gate(orph, "/tmp/_reg_orph.drawio.xml")
 check("unwired component IS an orphan",
       any("n_orphan_real" in x for x in v), "; ".join(v[:2]))
 
-# a wire pushed off the declared page must be reported
-off = re.sub(r'pageHeight="\d+"', 'pageHeight="500"', src, count=1)
+# a wire pushed off the declared page must be reported. The architecture page's
+# own pageHeight, read off that page: the palette tab comes first and has its
+# own, so a bare regex would edit the legend.
+_hla = src[src.index('name="HLA Overview"'):]
+_cur_h = re.search(r'pageHeight="(\d+)"', _hla).group(1)
+off = in_hla(src, f'pageHeight="{_cur_h}"', 'pageHeight="500"')
 v, _ = write_and_gate(off, "/tmp/_reg_off.drawio.xml")
 check("wire off the page is reported",
       any("off the page" in x for x in v), "; ".join(v[:2]))
+
+# a wire that doubles back on itself is one edge, so the per-pair crossing loop
+# cannot see it: every segment is legal and there is no second wire to blame.
+# Plant a wire whose own segments cross and require the gate to name it.
+selfx = src.replace(
+    '<mxCell id="e_bff"',
+    '<mxCell id="e_selfx" parent="1" source="n_bff" target="n_core" edge="1" '
+    'style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;'
+    'endArrow=classic;"><mxGeometry relative="1" as="geometry">'
+    '<Array as="points">'
+    '<mxPoint x="1200" y="400" /><mxPoint x="900" y="400" />'
+    '<mxPoint x="900" y="600" /><mxPoint x="1200" y="600" />'
+    '<mxPoint x="1200" y="420" />'
+    '</Array></mxGeometry></mxCell>'
+    '<mxCell id="e_bff"', 1)
+check("planted self-crossing wire is caught",
+      selfx != src
+      and any("crosses itself" in x
+              for x in write_and_gate(selfx, "/tmp/_reg_selfx.drawio.xml")[0]))
 
 # 7 -- CLI exit codes
 e0 = subprocess.run([sys.executable, os.path.join(RES, "verify_layout.py"),
@@ -174,35 +214,38 @@ leak = base.replace('value="HTTPS"', 'value="handler.go:42"', 1)
 check("gate reports a source coordinate",
       any("source coordinate" in v for v in gate_txt(leak, "/tmp/_reg_leak.drawio.xml")))
 
-band = base.replace('<mxCell id="0" />',
-                    '<mxCell id="panel_x" parent="1" '
-                    'style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;'
-                    'verticalAlign=top;spacingTop=8;fontSize=12;" value="Panel" '
-                    'vertex="1"><mxGeometry x="2000" y="200" width="600" '
-                    'height="400" as="geometry" /></mxCell>'
-                    '<mxCell id="panel_c" parent="1" style="text;html=1;" '
-                    'value="first row" vertex="1">'
-                    '<mxGeometry x="2020" y="206" width="200" height="14" '
-                    'as="geometry" /></mxCell>', 1)
+band = in_hla(base, '<mxCell id="0" />',
+              '<mxCell id="0" />'
+              '<mxCell id="panel_x" parent="1" '
+              'style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;'
+              'verticalAlign=top;spacingTop=8;fontSize=12;" value="Panel" '
+              'vertex="1"><mxGeometry x="2000" y="200" width="600" '
+              'height="400" as="geometry" /></mxCell>'
+              '<mxCell id="panel_c" parent="1" style="text;html=1;" '
+              'value="first row" vertex="1">'
+              '<mxGeometry x="2020" y="206" width="200" height="14" '
+              'as="geometry" /></mxCell>')
 check("gate reports content inside a title band",
       any("title band" in v for v in gate_txt(band, "/tmp/_reg_band.drawio.xml")))
 
-fit = base.replace('<mxCell id="0" />',
-                   '<mxCell id="note_tiny" parent="1" style="text;html=1;" '
-                   'value="this text cannot fit in a 20px box" vertex="1">'
-                   '<mxGeometry x="2000" y="600" width="60" height="12" '
-                   'as="geometry" /></mxCell>', 1)
+fit = in_hla(base, '<mxCell id="0" />',
+             '<mxCell id="0" />'
+             '<mxCell id="note_tiny" parent="1" style="text;html=1;" '
+             'value="this text cannot fit in a 20px box" vertex="1">'
+             '<mxGeometry x="2000" y="600" width="60" height="12" '
+             'as="geometry" /></mxCell>')
 check("gate reports a cell too small for its text",
       any("needs" in v and "box is" in v
           for v in gate_txt(fit, "/tmp/_reg_fit.drawio.xml")))
 
-unreach = base.replace('<mxCell id="0" />',
-                       '<mxCell id="n_unreached" parent="1" '
-                       'style="sketch=0;html=1;whitespace=wrap;'
-                       'verticalLabelPosition=bottom;shape=mxgraph.kubernetes.icon;'
-                       'prIcon=pod;" value="sink" vertex="1">'
-                       '<mxGeometry x="2200" y="60" width="40" height="40" '
-                       'as="geometry" /></mxCell>', 1)
+unreach = in_hla(base, '<mxCell id="0" />',
+                 '<mxCell id="0" />'
+                 '<mxCell id="n_unreached" parent="1" '
+                 'style="sketch=0;html=1;whitespace=wrap;'
+                 'verticalLabelPosition=bottom;shape=mxgraph.kubernetes.icon;'
+                 'prIcon=pod;" value="sink" vertex="1">'
+                 '<mxGeometry x="2200" y="60" width="40" height="40" '
+                 'as="geometry" /></mxCell>')
 check("gate reports an unreachable microservice",
       any("no incoming" in v or "orphan" in v
           for v in gate_txt(unreach, "/tmp/_reg_unreach.drawio.xml")))

@@ -719,6 +719,29 @@ def generate_drawio_xml(output_path, source="both"):
         f'value="{esc(caption)}" vertex="1">'
         f'<mxGeometry x="{PAGE_MARGIN_X}" y="44" width="900" height="26" '
         f'as="geometry" /></mxCell>')
+    # Lifecycle key beside the title: a reader should not have to open the
+    # palette tab to learn what a colour means. Swatches are the palette's own
+    # fill/stroke pairs, read from one list so the key cannot drift from the
+    # components it explains.
+    leg_x = PAGE_MARGIN_X + 940
+    for legend_id, label, fill, stroke in (
+            ("leg_new", "new", "#dae8fc", "#03CCFF"),
+            ("leg_reuse", "reused", "#f5f5f5", "#BFBFBF"),
+            ("leg_partner", "3rd-party", "#EF7D30", "#EF7D30")):
+        out.append(
+            f'        <mxCell id="{legend_id}" parent="1" '
+            f'style="rounded=0;whiteSpace=wrap;html=1;fillColor={fill};'
+            f'strokeColor={stroke};strokeWidth=1.5;" value="" vertex="1">'
+            f'<mxGeometry x="{leg_x}" y="49" width="14" height="14" '
+            f'as="geometry" /></mxCell>')
+        out.append(
+            f'        <mxCell id="{legend_id}_t" parent="1" '
+            f'style="text;html=1;strokeColor=none;fillColor=none;align=left;'
+            f'verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=9;" '
+            f'value="{label}" vertex="1">'
+            f'<mxGeometry x="{leg_x + 18}" y="47" width="90" height="18" '
+            f'as="geometry" /></mxCell>')
+        leg_x += 112
     x = PAGE_MARGIN_X
     for lane_id, title, w, fill, stroke in lanes:
         out.append(
@@ -784,8 +807,12 @@ def generate_drawio_xml(output_path, source="both"):
     out.append("  </diagram>")
     page_1 = "\n".join(out)
 
-    page_2 = load_standard_tab_xml()
-    full = f'<mxfile host="app.diagrams.net" pages="2">\n{page_1}\n{page_2}\n</mxfile>'
+    # Tab order: the palette first (the colour key before the colours), then
+    # the architecture. Tabs are addressed by name - the gate finds the
+    # architecture page by name - so this is a reading order, not a dependency.
+    palette = load_standard_tab_xml()
+    full = (f'<mxfile host="app.diagrams.net" pages="2">\n{palette}\n'
+            f'{page_1}\n</mxfile>')
 
     # Self-gate: the engine must not be able to emit a file its own checker
     # rejects. A model that cannot route cleanly is a MODELLING problem (too
